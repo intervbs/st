@@ -6,16 +6,9 @@
  * font: see http://freedesktop.org/software/fontconfig/fontconfig-user.html
  */
 static char *font = "DejaVuSansMono Nerd Font:pixelsize=14:antialias=true:autohint=true";
+
 static int borderpx = 1;
 
-/*
- * What program is execed by st depends of these precedence rules:
- * 1: program passed with -e
- * 2: scroll and/or utmp
- * 3: SHELL environment variable
- * 4: value of shell in /etc/passwd
- * 5: value of shell in config.h
- */
 static char *shell = "/bin/sh";
 char *utmp = NULL;
 /* scroll program: to enable use a string like "scroll" */
@@ -67,6 +60,12 @@ static unsigned int blinktimeout = 800;
  */
 static unsigned int cursorthickness = 2;
 
+const int boxdraw = 0;
+const int boxdraw_bold = 0;
+
+/* braille (U28XX):  1: render as adjacent "pixels",  0: use font */
+const int boxdraw_braille = 0;
+
 /*
  * bell volume. It must be a value between -100 and 100. Use 0 for disabling
  * it
@@ -76,55 +75,39 @@ static int bellvolume = 0;
 /* default TERM value */
 char *termname = "st-256color";
 
-/*
- * spaces per tab
- *
- * When you are changing this value, don't forget to adapt the »it« value in
- * the st.info and appropriately install the st.info in the environment where
- * you use this st version.
- *
- *	it#$tabspaces,
- *
- * Secondly make sure your kernel is not expanding tabs. When running `stty
- * -a` »tab0« should appear. You can tell the terminal to not expand tabs by
- *  running following command:
- *
- *	stty tabs
- */
 unsigned int tabspaces = 8;
 
 /* Terminal colors (16 first used in escape sequence) */
 static const char *colorname[] = {
-
-  /* 8 normal colors */
-  [0] = "#282828", /* hard contrast: #1d2021 / soft contrast: #32302f */
-  [1] = "#cc241d", /* red     */
-  [2] = "#98971a", /* green   */
-  [3] = "#d79921", /* yellow  */
-  [4] = "#458588", /* blue    */
-  [5] = "#b16286", /* magenta */
-  [6] = "#689d6a", /* cyan    */
-  [7] = "#a89984", /* white   */
-
-  /* 8 bright colors */
-  [8]  = "#928374", /* black   */
-  [9]  = "#fb4934", /* red     */
-  [10] = "#b8bb26", /* green   */
-  [11] = "#fabd2f", /* yellow  */
-  [12] = "#83a598", /* blue    */
-  [13] = "#d3869b", /* magenta */
-  [14] = "#8ec07c", /* cyan    */
-  [15] = "#ebdbb2", /* white   */
+    /* 8 normal colors */
+    [0] = "#2c2e34", /* hard contrast: #1d2021 / soft contrast: #32302f */
+    [1] = "#fc5d7c", /* red     */
+    [2] = "#9ed072", /* green   */
+    [3] = "#e7c664", /* yellow  */
+    [4] = "#76cce0", /* blue    */
+    [5] = "#b39df3", /* magenta */
+    [6] = "#f39660", /* cyan    */
+    [7] = "#e2e2e3", /* white   */
+    
+    /* 8 bright colors */
+    [8]  = "#928374", /* black   */
+    [9]  = "#fc5d7c", /* red     */
+    [10] = "#9ed072", /* green   */
+    [11] = "#e7c664", /* yellow  */
+    [12] = "#76cce0", /* blue    */
+    [13] = "#b39df3", /* magenta */
+    [14] = "#f39660", /* cyan    */
+    [15] = "#e2e2e3", /* white   */
 };
 
 /*
  * Default colors (colorname index)
- * foreground, background, cursor
+ * foreground, background, cursor, reverse cursor
  */
 unsigned int defaultfg = 15;
 unsigned int defaultbg = 0;
-static unsigned int defaultcs = 15;
-static unsigned int defaultrcs = 257;
+unsigned int defaultcs = 15;
+static int defaultrcs = 257;
 
 /*
  * Default shape of cursor
@@ -146,7 +129,7 @@ static unsigned int rows = 24;
  * Default colour and shape of the mouse cursor
  */
 static unsigned int mouseshape = XC_xterm;
-static unsigned int mousefg = 7;
+static unsigned int mousefg = 15;
 static unsigned int mousebg = 0;
 
 /*
@@ -168,57 +151,52 @@ static uint forcemousemod = ShiftMask;
  */
 static MouseShortcut mshortcuts[] = {
 	/* mask                 button   function        argument       release */
-	{ XK_ANY_MOD,           Button2, selpaste,       {.i = 0},      1 },
-	{ ShiftMask,            Button4, ttysend,        {.s = "\033[5;2~"} },
+	{ XK_ANY_MOD,           Button2, clippaste,      {.i = 0},      1 },
+	{ ShiftMask,            Button4, kscrollup,      {.i = 1} },
+	{ ShiftMask,            Button5, kscrolldown,    {.i = 1} },
 	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
-	{ ShiftMask,            Button5, ttysend,        {.s = "\033[6;2~"} },
+	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
+};
+
+/* #if SCROLLBACK_MOUSE_ALTSCREEN_PATCH */
+static MouseShortcut maltshortcuts[] = {
+	/* mask                 button   function        argument       release */
+	{ XK_ANY_MOD,           Button2, clippaste,      {.i = 0},      1 },
+	{ XK_ANY_MOD,           Button4, ttysend,        {.s = "\031"} },
 	{ XK_ANY_MOD,           Button5, ttysend,        {.s = "\005"} },
 };
 
 /* Internal keyboard shortcuts. */
-#define MODKEY Mod1Mask
-#define TERMMOD (ControlMask|ShiftMask)
+#define MODKEY Mod4Mask
+#define TERMMOD (Mod1Mask|ShiftMask)
+
+#if EXTERNALPIPE_PATCH // example command
+static char *openurlcmd[] = { "/bin/sh", "-c",
+	"xurls | dmenu -l 10 -w $WINDOWID | xargs -r open",
+	"externalpipe", NULL };
+#endif // EXTERNALPIPE_PATCH
 
 static Shortcut shortcuts[] = {
-	/* mask                 keysym          function        argument */
-	{ XK_ANY_MOD,           XK_Break,       sendbreak,      {.i =  0} },
-	{ ControlMask,          XK_Print,       toggleprinter,  {.i =  0} },
-	{ ShiftMask,            XK_Print,       printscreen,    {.i =  0} },
-	{ XK_ANY_MOD,           XK_Print,       printsel,       {.i =  0} },
-	{ TERMMOD,              XK_Prior,       zoom,           {.f = +1} },
-	{ TERMMOD,              XK_Next,        zoom,           {.f = -1} },
-	{ TERMMOD,              XK_Home,        zoomreset,      {.f =  0} },
-	{ TERMMOD,              XK_C,           clipcopy,       {.i =  0} },
-	{ TERMMOD,              XK_V,           clippaste,      {.i =  0} },
-	{ TERMMOD,              XK_Y,           selpaste,       {.i =  0} },
-	{ ShiftMask,            XK_Insert,      selpaste,       {.i =  0} },
-	{ TERMMOD,              XK_Num_Lock,    numlock,        {.i =  0} },
-	{ ShiftMask,            XK_Page_Up,     kscrollup,      {.i = -1} },
-	{ ShiftMask,            XK_Page_Down,   kscrolldown,    {.i = -1} },
-	{ MODKEY,               XK_o,           opencopied,     {.v = "xdg-open"} },
-	{ MODKEY,               XK_l,           copyurl,        {.i =  0} },
+	/* mask                 keysym          function         argument */
+	{ XK_ANY_MOD,           XK_Break,       sendbreak,       {.i =  0} },
+	{ ControlMask,          XK_Print,       toggleprinter,   {.i =  0} },
+	{ ShiftMask,            XK_Print,       printscreen,     {.i =  0} },
+	{ XK_ANY_MOD,           XK_Print,       printsel,        {.i =  0} },
+	{ TERMMOD,              XK_Prior,       zoom,            {.f = +1} },
+	{ TERMMOD,              XK_Next,        zoom,            {.f = -1} },
+	{ TERMMOD,              XK_Home,        zoomreset,       {.f =  0} },
+	{ TERMMOD,              XK_C,           clipcopy,        {.i =  0} },
+	{ TERMMOD,              XK_V,           clippaste,       {.i =  0} },
+	{ ShiftMask,            XK_Page_Up,     kscrollup,       {.i = -1} },
+	{ ShiftMask,            XK_Page_Down,   kscrolldown,     {.i = -1} },
+	{ TERMMOD,              XK_Y,           clippaste,       {.i =  0} },
+	{ ShiftMask,            XK_Insert,      clippaste,       {.i =  0} },
+	{ TERMMOD,              XK_Num_Lock,    numlock,         {.i =  0} },
+	{ MODKEY,               XK_l,           copyurl,         {.i =  0} },
+	{ MODKEY,               XK_o,           opencopied,      {.v = "xdg-open"} },
+	{ TERMMOD,              XK_Return,      newterm,         {.i =  0} },
+	{ TERMMOD,              XK_X,           invert,          { 0 } },
 };
-
-/*
- * Special keys (change & recompile st.info accordingly)
- *
- * Mask value:
- * * Use XK_ANY_MOD to match the key no matter modifiers state
- * * Use XK_NO_MOD to match the key alone (no modifiers)
- * appkey value:
- * * 0: no value
- * * > 0: keypad application mode enabled
- * *   = 2: term.numlock = 1
- * * < 0: keypad application mode disabled
- * appcursor value:
- * * 0: no value
- * * > 0: cursor application mode enabled
- * * < 0: cursor application mode disabled
- *
- * Be careful with the order of the definitions because st searches in
- * this table sequentially, so any XK_ANY_MOD must be in the last
- * position for a key.
- */
 
 /*
  * If you want keys other than the X11 function keys (0xFD00 - 0xFFFF)
